@@ -24,3 +24,11 @@ jobs:
       - run: npm run build
         working-directory: frontend
       - run: dotnet publish backend/Paper.Api --no-restore -c Release -o publish
+      - name: Build deployment image
+        run: docker build -t paper-product-tool:ci .
+      - name: Verify container startup and frontend
+        run: |
+          docker run --detach --name paper-smoke -p 127.0.0.1:10000:10000 paper-product-tool:ci
+          trap 'docker logs paper-smoke; docker rm -f paper-smoke' EXIT
+          curl --fail --retry 20 --retry-delay 2 --retry-connrefused http://127.0.0.1:10000/healthz
+          curl --fail http://127.0.0.1:10000/ | grep 'id="root"'

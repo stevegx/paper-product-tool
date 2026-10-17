@@ -37,6 +37,12 @@ public sealed class ApiTests
     { var result=await Post(client,"/api/auth/login",new{email,password="Integration-2026-Only"});Assert.Equal(HttpStatusCode.OK,result.StatusCode); }
     private static object VisitBody(JsonElement survey,Guid submission,string code="BR-01",object[]? answers=null)=>new{branchCode=code,submissionId=submission,surveyVersion=survey.GetProperty("version").GetString(),notes="Επίσκεψη δοκιμής",answers=answers??[]};
 
+    [Fact] public async Task HealthEndpointIsAvailableWithoutAuthentication()
+    {
+        using var factory=new ApiFactory();using var client=factory.CreateClient();
+        var health=await client.GetFromJsonAsync<JsonElement>("/healthz");
+        Assert.Equal("ok",health.GetProperty("status").GetString());
+    }
     [Fact] public async Task RequiresAuthenticationAndAntiforgery()
     {
         using var factory=new ApiFactory();using var client=factory.CreateClient();

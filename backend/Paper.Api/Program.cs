@@ -92,6 +92,7 @@ app.Use(async (context, next) =>
         await context.RequestServices.GetRequiredService<IAntiforgery>().ValidateRequestAsync(context);
     await next();
 });
+app.MapGet("/healthz", () => Results.Ok(new { status = "ok" })).AllowAnonymous();
 app.MapAuthEndpoints();
 app.MapCustomerEndpoints();
 app.MapAdminEndpoints();
