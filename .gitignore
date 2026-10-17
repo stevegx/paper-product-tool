@@ -18,3 +18,9 @@ backend/Paper.Api/wwwroot/
 *.user
 .vs/
 *.tsbuildinfo
+.neon
+.neon.*
+.agents/skills/
+.codex/
+skills-lock.json
+node_modules/

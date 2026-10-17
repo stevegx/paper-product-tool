@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.DataProtection.EntityFrameworkCore;
 
 namespace Paper.Api;
 
@@ -101,8 +102,9 @@ public sealed class ImportRun
     public int BranchCount { get; set; }
     public int TurnoverCount { get; set; }
 }
-public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(options)
+public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(options), IDataProtectionKeyContext
 {
+    public DbSet<DataProtectionKey> DataProtectionKeys { get; set; } = null!;
     public DbSet<Branch> Branches => Set<Branch>();
     public DbSet<ProductCategory> Categories => Set<ProductCategory>();
     public DbSet<CategoryTurnover> Turnovers => Set<CategoryTurnover>();

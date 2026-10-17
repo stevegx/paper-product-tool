@@ -49,7 +49,7 @@ React / TypeScript frontend και ASP.NET Core 10 API με Entity Framework Cor
 
 ## Βάση δεδομένων
 
-Για άμεση τοπική δοκιμή χρησιμοποιείται **SQLite**, με αρχείο `backend/Paper.Api/App_Data/paper.db`. Τα κλειδιά συνεδριών βρίσκονται στο `App_Data/keys`. Κράτα αντίγραφα της βάσης και των κλειδιών και μην εκθέτεις αυτόν τον φάκελο ως webroot.
+Για άμεση τοπική δοκιμή χρησιμοποιείται **SQLite**, με αρχείο `backend/Paper.Api/App_Data/paper.db`. Τα κλειδιά συνεδριών αποθηκεύονται πλέον στον πίνακα `DataProtectionKeys` της ίδιας βάσης. Η πρώτη μετάβαση από τα παλιά αρχεία κλειδιών μπορεί να ζητήσει νέο login. Κράτα αντίγραφα της βάσης και μην εκθέτεις αυτόν τον φάκελο ως webroot.
 
 Για **SQL Server**, πριν την εκκίνηση:
 
@@ -106,7 +106,7 @@ dotnet publish backend/Paper.Api -c Release -o .local/publish
 
 Ο πρώτος admin σε παραγωγή δημιουργείται με μεταβλητές περιβάλλοντος `Bootstrap__Email` και `Bootstrap__Password` μόνο όταν δεν υπάρχουν χρήστες. Αφαίρεσέ τες μετά την πρώτη εκκίνηση. Μην βάζεις passwords στο repo. Cookies HttpOnly/SameSite, CSRF tokens στις μεταβολές, περιορισμός προσπαθειών σύνδεσης και server-side έλεγχος admin εφαρμόζονται από το API.
 
-Δεν έχει γίνει δημοσίευση σε server. Η σύνδεση με πραγματικό SQL Server πρέπει να επαληθευτεί στο περιβάλλον φιλοξενίας.
+Το deployment στο Render περιγράφεται παρακάτω. Η σύνδεση με πραγματικό SQL Server πρέπει να επαληθευτεί στο περιβάλλον φιλοξενίας.
 
 
 ## Επισκέψεις, διορθώσεις και χρήση χωρίς σύνδεση
@@ -170,9 +170,24 @@ dotnet publish backend/Paper.Api -c Release -o .local/publish
 
 Στα Environment Variables όρισε `Bootstrap__Email` και `Bootstrap__Password` για τον πρώτο admin (12–128 χαρακτήρες, γράμματα και αριθμοί). Αφαίρεσέ τα αφού δημιουργηθεί ο λογαριασμός **σε μόνιμη βάση**. Δεν χρειάζονται build arguments ή secrets μέσα στο Dockerfile. Το image χρησιμοποιεί Production και επιτρέπει τα domains `*.onrender.com`. Για δικό σου domain όρισε `AllowedHosts` με τα επιτρεπόμενα hostnames χωρισμένα με `;`.
 
-**Free Render = προσωρινό demo με την προεπιλεγμένη SQLite.** Το Docker δεν παρέχει μόνιμη αποθήκευση. Σε επανεκκίνηση, sleep ή deploy χάνονται η βάση, οι λογαριασμοί, οι εισαγωγές και οι επισκέψεις του server. Το offline αντίγραφο δεν είναι backup ήδη συγχρονισμένων επισκέψεων. Μην χρησιμοποιείς αυτή τη διαμόρφωση για πραγματικές επισκέψεις.
+**Free Render με Neon = μόνιμη εξωτερική PostgreSQL.** Το Render κρατά μόνο το app· χρήστες, πελάτες, επισκέψεις, ιστορικό και κλειδιά συνεδριών αποθηκεύονται στο Neon. Restart, sleep και deploy της εφαρμογής δεν διαγράφουν τη βάση. Για να αποφεύγεται νέα απώλεια δεδομένων, η εφαρμογή στο Render αρνείται πλέον να ξεκινήσει με SQLite, εκτός αν δοθεί ρητά `Database__AllowEphemeralSqlite=true` για προσωρινό demo. Μην ορίζεις αυτή την εξαίρεση στην κανονική εγκατάσταση.
 
-Για μόνιμα δεδομένα χρησιμοποίησε είτε πληρωμένο service με disk στο `/app/App_Data` (SQLite και κλειδιά σύνδεσης), είτε εξωτερικό SQL Server με `Database__Provider=SqlServer` και `ConnectionStrings__Database` από τα ασφαλή Environment Variables. Η εξωτερική βάση πρέπει να υπάρχει και να είναι προσβάσιμη πριν το deploy. PostgreSQL δεν υποστηρίζεται ακόμη από την εφαρμογή. Σε Free service με εξωτερική βάση, η επανεκκίνηση χάνει τα τοπικά κλειδιά σύνδεσης και μπορεί να ζητηθεί νέο login, χωρίς να χαθούν τα δεδομένα της εξωτερικής βάσης. Για SQLite στον πληρωμένο δίσκο, έλεγξε ότι το UID του container έχει δικαίωμα εγγραφής στο mount και ρύθμισε ανεξάρτητα τακτικά backups βάσης.
+Το Neon CLI γράφει τα `DATABASE_URL` (pooled), `DATABASE_URL_UNPOOLED` (direct) και `NEON_BRANCH` στο αγνοημένο `.env.local`. Πρόσθεσε τα δύο URLs στα Environment Variables του Render, από το branch **production**. Δεν χρησιμοποιούνται στο React, δεν χρειάζονται `VITE_` prefix και δεν μπαίνουν στο image ή στο GitHub. Η εφαρμογή επιλέγει PostgreSQL όταν υπάρχει `DATABASE_URL`. Το pooled URL χρησιμοποιείται για αιτήματα και το direct URL για αρχικοποίηση/αναβάθμιση σχήματος. Χωρίς έγκυρη σύνδεση δεν υπάρχει σιωπηλή επιστροφή σε τοπική βάση. Υποστηρίζονται URL του Neon και Npgsql connection strings με `Database__Provider=Postgres` / `ConnectionStrings__Database`. Το login διατηρεί το υπάρχον .NET σύστημα· δεν ενεργοποιούνται Neon Auth, Data API ή άλλες υπηρεσίες.
+
+Το `neon.ts` κρατά τη δηλωμένη πολιτική του project. Η `.neon`, τα OAuth credentials στο `.local/neon`, τα project MCP settings και τα skills εξαιρούνται από το Git. Για CLI στο παρόν Windows περιβάλλον χρησιμοποιείται `npx neon@latest --config-dir .local/neon`. Το MCP είναι ρυθμισμένο για Codex με OAuth και scope στο συγκεκριμένο project. Η εισαγωγή του server στο ενεργό Codex runtime και το πρώτο MCP OAuth sign-in μπορεί να απαιτούν επαναφόρτωση του project· το CLI λειτουργεί ανεξάρτητα.
+
+Τοπικά, μετά από `neon deploy` και εγκατάσταση των dependencies:
+
+```sh
+npm run build
+npm start
+```
+
+Το `npm start` φορτώνει server-side το `.env.local` και ανοίγει το .NET στο `http://127.0.0.1:5083`. Η πρώτη τοπική ρύθμιση admin επιτρέπεται μόνο σε Development/loopback. Σε Render κράτησε τα Bootstrap env vars μέχρι να δημιουργηθεί ο admin στη νέα μόνιμη βάση. Έπειτα αφαίρεσέ τα. Η αλλαγή αυτών των vars δεν αλλάζει τον κωδικό ενός υπάρχοντος admin.
+
+Ο έλεγχος `node scripts/test-neon.mjs` επιτρέπεται μόνο στο ξεχωριστό Neon branch `codex-persistence-check` και απαιτεί publish στο `.local/neon-publish`, .NET 10 και Python 3 για το συνθετικό Excel. Δοκιμάζει το πραγματικό .NET HTTP API, import, login, ερωτηματολόγιο, αποστολή, επανεκκίνηση του process, μόνιμα cookies/χρήστες/απαντήσεις, επανάληψη χωρίς διπλότυπο, offline snapshot και Excel export. Αφού τελειώσει, επέστρεψε στο `production` με `neon checkout production`. Το CI επαναλαμβάνει τις δοκιμές API και σε PostgreSQL 17.
+
+Η μόνιμη αποθήκευση δεν αντικαθιστά backup. Πριν από αλλαγές σχήματος κράτα backup και έλεγξε τη δυνατότητα επαναφοράς. Για ανεξάρτητο αρχείο χρησιμοποίησε `pg_dump` με το direct URL και αποθήκευσέ το εκτός του δωρεάν Render, σε προστατευμένο χώρο: περιέχει στοιχεία πελατών, hashes κωδικών και κλειδιά συνεδριών. Δεν έχει ρυθμιστεί αυτόματο backup εκτός Neon από αυτή την εγκατάσταση. Τα όρια compute/storage και το παράθυρο instant restore του Free plan παραμένουν ενεργά.
 
 Η εισαγωγή του Excel πελατών γίνεται μετά τη σύνδεση ως admin από το interface. Το image και το GitHub δεν περιέχουν τη βάση πελατών.
 
@@ -183,7 +198,7 @@ docker build -t paper-product-tool .
 docker run --rm -p 10000:10000 paper-product-tool
 ```
 
-Το `/healthz` και η αρχική σελίδα πρέπει να απαντούν στο `http://localhost:10000`. Για login και offline δοκιμές σε Production χρειάζεται HTTPS. Το CI χτίζει το πραγματικό Docker image και ελέγχει την εκκίνηση και τη διάθεση του React.
+Το `/healthz` και η αρχική σελίδα πρέπει να απαντούν στο `http://localhost:10000`. Για login και offline δοκιμές σε Production χρειάζεται HTTPS. Στο Render ο proxy στέλνει το αρχικό HTTPS scheme. Το CI χτίζει το πραγματικό Docker image και ελέγχει την εκκίνηση και τη διάθεση του React.
 
 Στο Render η αυτόματη μεταβλητή `RENDER=true` ενεργοποιεί αναγνώριση του `X-Forwarded-Proto` πριν από cookies και antiforgery: το δημόσιο HTTPS τερματίζει στον proxy, ενώ το container δέχεται HTTP. Τα cookies παραμένουν Secure και το CSRF παραμένει ενεργό. Εμπιστευόμαστε μόνο το scheme από τον πλησιέστερο proxy, όχι τα forwarded IP/host headers. Αυτή η ρύθμιση προϋποθέτει πρόσβαση στο container μέσω του ελεγχόμενου ingress του Render· μην ορίζεις `RENDER=true` σε server που εκθέτει απευθείας το HTTP port στο Internet.
 

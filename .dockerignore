@@ -1,4 +1,8 @@
 .git
+.neon
+.neon.*
+.agents
+.codex
 .github
 .local
 **/bin

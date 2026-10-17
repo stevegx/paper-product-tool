@@ -11,19 +11,41 @@ using Xunit;
 namespace Paper.Api.Tests;
 public sealed class ApiFactory : WebApplicationFactory<Program>
 {
-    private readonly string path=Path.Combine(Path.GetTempPath(),$"paper-tests-{Guid.NewGuid()}.db");
+    private readonly string path;
+    private readonly string? postgres;
+    private readonly bool keepDatabase;
+    public ApiFactory(string? storageId=null, bool keepDatabase=false)
+    {
+        var id=storageId??Guid.NewGuid().ToString("N");
+        path=Path.Combine(Path.GetTempPath(),$"paper-tests-{id}.db");
+        this.keepDatabase=keepDatabase;
+        if(Environment.GetEnvironmentVariable("PAPER_TEST_POSTGRES") is {Length:>0} admin)
+            postgres=new Npgsql.NpgsqlConnectionStringBuilder(admin){Database=$"paper_test_{id}"}.ConnectionString;
+    }
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseEnvironment("Testing");
         builder.ConfigureAppConfiguration((_,config)=>config.AddInMemoryCollection(new Dictionary<string,string?>{
-            ["Database:Provider"]="Sqlite",["ConnectionStrings:Database"]=$"Data Source={path}",
+            ["Database:Provider"]=postgres is null?"Sqlite":"Postgres",["ConnectionStrings:Database"]=postgres??$"Data Source={path}",
+            ["DATABASE_URL"]=null,["DATABASE_URL_UNPOOLED"]=null,["Database:AllowEphemeralSqlite"]="true",
             ["Bootstrap:Email"]="admin@example.test",["Bootstrap:Password"]="Integration-2026-Only",["Import:Path"]="",["Survey:InstallDefault"]="false"
         }));
     }
     public async Task Seed()
     { using var scope=Services.CreateScope();using var file=WorkbookFixture.Create();await new ExcelImporter().ImportAsync(scope.ServiceProvider.GetRequiredService<AppDbContext>(),file,2026); }
     protected override void Dispose(bool disposing)
-    {base.Dispose(disposing);if(disposing){Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();foreach(var suffix in new[]{"","-wal","-shm"})if(File.Exists(path+suffix))File.Delete(path+suffix);}}
+    {
+        base.Dispose(disposing);
+        if(!disposing||keepDatabase)return;
+        if(postgres is not null)
+        {
+            var builder=new Npgsql.NpgsqlConnectionStringBuilder(postgres);
+            var name=builder.Database;builder.Database="postgres";builder.Pooling=false;
+            using var connection=new Npgsql.NpgsqlConnection(builder.ConnectionString);connection.Open();
+            using var command=connection.CreateCommand();command.CommandText=$"DROP DATABASE IF EXISTS \"{name}\" WITH (FORCE)";command.ExecuteNonQuery();
+        }
+        else {Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();foreach(var suffix in new[]{"","-wal","-shm"})if(File.Exists(path+suffix))File.Delete(path+suffix);}
+    }
 }
 public sealed class ApiTests
 {

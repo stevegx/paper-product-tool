@@ -22,21 +22,24 @@ builder.Services.Configure<ForwardedHeadersOptions>(options =>
     options.KnownIPNetworks.Clear();
     options.KnownProxies.Clear();
 });
-var keyDirectory = new DirectoryInfo(Path.Combine(builder.Environment.ContentRootPath, "App_Data", "keys"));
-keyDirectory.Create();
-builder.Services.AddDataProtection().SetApplicationName("PaperProductTool").PersistKeysToFileSystem(keyDirectory);
+builder.Services.AddDataProtection().SetApplicationName("PaperProductTool").PersistKeysToDbContext<AppDbContext>();
 builder.Services.AddDbContext<AppDbContext>(options =>
 {
-    var provider = builder.Configuration["Database:Provider"] ?? "Sqlite";
-    var connection = builder.Configuration.GetConnectionString("Database");
+    var databaseUrl = builder.Configuration["DATABASE_URL"];
+    var provider = !string.IsNullOrWhiteSpace(databaseUrl) ? "Postgres" : builder.Configuration["Database:Provider"] ?? "Sqlite";
+    var connection = !string.IsNullOrWhiteSpace(databaseUrl) ? databaseUrl : builder.Configuration.GetConnectionString("Database");
     if (provider.Equals("SqlServer", StringComparison.OrdinalIgnoreCase))
         options.UseSqlServer(connection ?? throw new InvalidOperationException("Set ConnectionStrings__Database for SQL Server."));
+    else if (provider.Equals("Postgres", StringComparison.OrdinalIgnoreCase) || provider.Equals("PostgreSQL", StringComparison.OrdinalIgnoreCase))
+        options.UseNpgsql(PostgresConnection.Parse(connection));
     else if (provider.Equals("Sqlite", StringComparison.OrdinalIgnoreCase))
     {
+        if (builder.Configuration.GetValue<bool>("RENDER") && !builder.Configuration.GetValue<bool>("Database:AllowEphemeralSqlite"))
+            throw new InvalidOperationException("Render requires persistent storage. Set Database__Provider=Postgres and ConnectionStrings__Database. Temporary SQLite demos require explicit Database__AllowEphemeralSqlite=true.");
         Directory.CreateDirectory(Path.Combine(builder.Environment.ContentRootPath, "App_Data"));
         options.UseSqlite(connection ?? $"Data Source={Path.Combine(builder.Environment.ContentRootPath, "App_Data", "paper.db")}");
     }
-    else throw new InvalidOperationException("Database:Provider must be SqlServer or Sqlite.");
+    else throw new InvalidOperationException("Database:Provider must be Postgres, SqlServer or Sqlite.");
 });
 builder.Services.AddSingleton<ExcelImporter>();
 builder.Services.AddSingleton<PasswordHasher<AppUser>>();
@@ -114,13 +117,16 @@ app.Map("/api/{**path}", () => Results.NotFound());
 app.MapFallbackToFile("index.html");
 await using (var scope = app.Services.CreateAsyncScope())
 {
-    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+    var scopedDb = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+    var config = app.Configuration;
+    await using var schemaDb = scopedDb.Database.IsNpgsql() && config["DATABASE_URL_UNPOOLED"] is { Length: > 0 } directUrl
+        ? new AppDbContext(new DbContextOptionsBuilder<AppDbContext>().UseNpgsql(PostgresConnection.Parse(directUrl)).Options) : null;
+    var db = schemaDb ?? scopedDb;
     await db.Database.EnsureCreatedAsync();
     await SurveyCatalog.UpgradeAsync(db);
     await VisitUpgrade.Run(db);
     if (app.Configuration.GetValue("Survey:InstallDefault", true))
         await SurveyCatalog.InstallAsync(db, Path.Combine(app.Environment.ContentRootPath, "Surveys", "store-visit-v1.json"));
-    var config = app.Configuration;
     if (!await db.Users.AnyAsync() && config["Bootstrap:Email"] is { Length: > 0 } email && config["Bootstrap:Password"] is { Length: > 0 } password)
     {
         db.Users.Add(MakeUser(new CreateUserInput(email, "Διαχειριστής", password, "Admin"), scope.ServiceProvider.GetRequiredService<PasswordHasher<AppUser>>()));

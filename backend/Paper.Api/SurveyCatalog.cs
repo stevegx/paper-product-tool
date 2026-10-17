@@ -17,12 +17,13 @@ public static class SurveyCatalog
             {
                 await using var check = db.Database.GetDbConnection().CreateCommand();
                 check.Transaction = transaction.GetDbTransaction();
-                check.CommandText = db.Database.IsSqlite() ? "SELECT COUNT(*) FROM pragma_table_info('Questions') WHERE name = @column" : "SELECT COUNT(*) FROM sys.columns WHERE object_id=OBJECT_ID(N'Questions') AND name=@column";
+                check.CommandText = db.Database.IsSqlite() ? "SELECT COUNT(*) FROM pragma_table_info('Questions') WHERE name = @column" : db.Database.IsNpgsql() ? "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='Questions' AND column_name=@column" : "SELECT COUNT(*) FROM sys.columns WHERE object_id=OBJECT_ID(N'Questions') AND name=@column";
                 var parameter = check.CreateParameter(); parameter.ParameterName = "@column"; parameter.Value = name; check.Parameters.Add(parameter);
                 if (Convert.ToInt32(await check.ExecuteScalarAsync()) > 0) continue;
                 // These identifiers/defaults are fixed literals above, never user input.
                 var sql = db.Database.IsSqlite()
                     ? $"ALTER TABLE Questions ADD COLUMN {name} TEXT NOT NULL DEFAULT '{fallback}'"
+                    : db.Database.IsNpgsql() ? $"ALTER TABLE \"Questions\" ADD COLUMN \"{name}\" varchar({length}) NOT NULL DEFAULT '{fallback}'"
                     : $"ALTER TABLE Questions ADD {name} nvarchar({length}) NOT NULL CONSTRAINT DF_Questions_{name} DEFAULT N'{fallback}'";
                 await db.Database.ExecuteSqlRawAsync(sql);
             }
