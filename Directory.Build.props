@@ -1,0 +1,3 @@
+<Project>
+  <PropertyGroup><UseSharedCompilation>false</UseSharedCompilation></PropertyGroup>
+</Project>
