@@ -28,7 +28,8 @@ jobs:
         run: docker build -t paper-product-tool:ci .
       - name: Verify container startup and frontend
         run: |
-          docker run --detach --name paper-smoke -e PORT=10001 -p 127.0.0.1:10000:10001 paper-product-tool:ci
+          docker run --detach --name paper-smoke -e RENDER=true -e PORT=10001 -p 127.0.0.1:10000:10001 paper-product-tool:ci
           trap 'docker logs paper-smoke; docker rm -f paper-smoke' EXIT
           curl --fail --retry 20 --retry-delay 2 --retry-all-errors --retry-max-time 60 http://127.0.0.1:10000/healthz
           curl --fail http://127.0.0.1:10000/ | grep 'id="root"'
+          curl --fail -H 'X-Forwarded-Proto: https' http://127.0.0.1:10000/api/auth/csrf | grep '"token"'

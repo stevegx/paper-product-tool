@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Http.Features;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.RateLimiting;
@@ -12,6 +13,15 @@ using Paper.Api;
 using static Paper.Api.ApiHelpers;
 
 var builder = WebApplication.CreateBuilder(args);
+builder.Services.Configure<ForwardedHeadersOptions>(options =>
+{
+    // Render terminates TLS and overwrites this header at its public ingress.
+    // Only trust the nearest proxy's scheme, never client-supplied IP/host headers.
+    options.ForwardedHeaders = ForwardedHeaders.XForwardedProto;
+    options.ForwardLimit = 1;
+    options.KnownIPNetworks.Clear();
+    options.KnownProxies.Clear();
+});
 var keyDirectory = new DirectoryInfo(Path.Combine(builder.Environment.ContentRootPath, "App_Data", "keys"));
 keyDirectory.Create();
 builder.Services.AddDataProtection().SetApplicationName("PaperProductTool").PersistKeysToFileSystem(keyDirectory);
@@ -65,6 +75,7 @@ builder.Services.AddRateLimiter(options =>
 builder.Services.Configure<FormOptions>(options => options.MultipartBodyLengthLimit = 8 * 1024 * 1024);
 builder.WebHost.ConfigureKestrel(options => options.Limits.MaxRequestBodySize = 9 * 1024 * 1024);
 var app = builder.Build();
+if (app.Configuration.GetValue<bool>("RENDER")) app.UseForwardedHeaders();
 app.Use(async (context, next) =>
 {
     context.Response.Headers["X-Content-Type-Options"] = "nosniff";
