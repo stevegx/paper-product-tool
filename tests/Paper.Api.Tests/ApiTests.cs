@@ -61,9 +61,12 @@ public sealed class ApiTests
 
     [Fact] public async Task HealthEndpointIsAvailableWithoutAuthentication()
     {
-        using var factory=new ApiFactory();using var client=factory.CreateClient();
+        using var factory=new ApiFactory();
+        using var configured=factory.WithWebHostBuilder(builder=>builder.ConfigureAppConfiguration((_,config)=>config.AddInMemoryCollection(new Dictionary<string,string?>{["RENDER_GIT_COMMIT"]="build-test"})));
+        using var client=configured.CreateClient();
         var health=await client.GetFromJsonAsync<JsonElement>("/healthz");
         Assert.Equal("ok",health.GetProperty("status").GetString());
+        Assert.Equal("build-test",health.GetProperty("commit").GetString());
     }
     [Fact] public async Task RequiresAuthenticationAndAntiforgery()
     {
