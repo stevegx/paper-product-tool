@@ -54,6 +54,26 @@ public sealed class ReliabilityTests
         var empty=await c.GetAsync("/api/admin/visits/export?afm=999999999");using var emptyStream=await empty.Content.ReadAsStreamAsync();using var emptyBook=new XLWorkbook(emptyStream);Assert.Equal(1,emptyBook.Worksheet(1).LastRowUsed()!.RowNumber());
         var latest=await c.GetAsync("/api/admin/visits/export?afm=012345678&latestOnly=true");using var latestStream=await latest.Content.ReadAsStreamAsync();using var latestBook=new XLWorkbook(latestStream);Assert.Equal(2,latestBook.Worksheet(1).LastRowUsed()!.RowNumber());
     }
+    [Fact] public async Task AdminCanAddNewOptionsWhileEditingAndPreserveOldAnswers()
+    {
+        using var f=new ApiFactory();await f.Seed();using var c=f.CreateClient();await Login(c);
+        Assert.Equal(HttpStatusCode.OK,(await Send(c,"/api/admin/questions",new{title="Χώροι",required=false,options=new[]{"Κουζίνα","Τραπεζαρία"}})).StatusCode);
+        var before=await c.GetFromJsonAsync<JsonElement>("/api/survey");var question=before.GetProperty("questions")[0];
+        var questionId=question.GetProperty("id").GetGuid();var optionId=question.GetProperty("options")[0].GetProperty("id").GetGuid();
+        var visitId=Guid.NewGuid();
+        Assert.Equal(HttpStatusCode.OK,(await Send(c,$"/api/visits/{visitId}",Body(before,Guid.NewGuid(),answers:new object[]{new{questionId,optionIds=new[]{optionId}}}),HttpMethod.Put)).StatusCode);
+        var change=new{expectedSurveyVersion=before.GetProperty("version").GetString(),title="Διαθέσιμοι χώροι",required=false,selectionMode="Multiple",sectionKey="",options=new[]{new{id=optionId,label="Χώρος κουζίνας"},new{id=Guid.Empty,label="Τουαλέτα"},new{id=Guid.Empty,label="Αποθήκη"}}};
+        var response=await Send(c,$"/api/admin/questions/{questionId}",change,HttpMethod.Put);
+        Assert.True(response.StatusCode==HttpStatusCode.OK,await response.Content.ReadAsStringAsync());
+        var after=await c.GetFromJsonAsync<JsonElement>("/api/survey");var options=after.GetProperty("questions")[0].GetProperty("options");
+        Assert.Equal(3,options.GetArrayLength());Assert.Equal(optionId,options[0].GetProperty("id").GetGuid());
+        Assert.All(options.EnumerateArray(),o=>Assert.NotEqual(Guid.Empty,o.GetProperty("id").GetGuid()));
+        Assert.Equal(3,options.EnumerateArray().Select(o=>o.GetProperty("id").GetGuid()).Distinct().Count());
+        Assert.Equal(HttpStatusCode.Conflict,(await Send(c,$"/api/admin/questions/{questionId}",change,HttpMethod.Put)).StatusCode);
+        var history=await c.GetFromJsonAsync<JsonElement>($"/api/visits/{visitId}/editor");
+        Assert.Equal("Χώροι",history.GetProperty("survey").GetProperty("questions")[0].GetProperty("title").GetString());
+        Assert.Equal("Κουζίνα",history.GetProperty("visit").GetProperty("answers")[0].GetProperty("selectedOptions")[0].GetString());
+    }
     [Fact] public async Task AdminCanCorrectSellerVisitAndOtherSellersCannot()
     {
         using var f=new ApiFactory();await f.Seed();using var admin=f.CreateClient();await Login(admin);

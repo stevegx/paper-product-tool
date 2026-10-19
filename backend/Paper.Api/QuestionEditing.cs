@@ -29,7 +29,14 @@ public static class QuestionEditing
                 for(var i=0;i<options.Length;i++)
                 {
                     var option=question.Options.FirstOrDefault(o=>o.Id==options[i].Id&&o.Id!=Guid.Empty);
-                    if(option is null){option=new SurveyOption{SurveyQuestionId=id};question.Options.Add(option);}
+                    if(option is null)
+                    {
+                        option=new SurveyOption{SurveyQuestionId=id};
+                        question.Options.Add(option);
+                        // The constructor assigns a Guid. Explicitly mark the child as new;
+                        // relationship discovery otherwise treats that key as an existing row.
+                        db.Add(option);
+                    }
                     option.Label=options[i].Label.Trim();option.Position=i;
                 }
                 await db.SaveChangesAsync(ct);await VisitEndpoints.PublishedSurvey(db);return Results.Ok(new{id=question.Id});

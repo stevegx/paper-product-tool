@@ -89,7 +89,18 @@ app.Use(async (context, next) =>
     try { await next(); }
     catch (InputException exception) { context.Response.StatusCode = 400; await context.Response.WriteAsJsonAsync(new { message = exception.Message }); }
     catch (AntiforgeryValidationException) { context.Response.StatusCode = 400; await context.Response.WriteAsJsonAsync(new { message = "Η συνεδρία άλλαξε. Ανανέωσε τη σελίδα και δοκίμασε ξανά." }); }
-    catch (DbUpdateConcurrencyException) { context.Response.StatusCode = 409; await context.Response.WriteAsJsonAsync(new { code = "conflict", message = "Η επίσκεψη άλλαξε από άλλον χρήστη. Άνοιξε τη νεότερη καταχώριση πριν αποθηκεύσεις." }); }
+    catch (DbUpdateConcurrencyException)
+    {
+        var questionChange = context.Request.Path.StartsWithSegments("/api/admin/questions");
+        context.Response.StatusCode = 409;
+        await context.Response.WriteAsJsonAsync(new
+        {
+            code = questionChange ? "question_conflict" : "conflict",
+            message = questionChange
+                ? "Η ερώτηση ή οι επιλογές της άλλαξαν. Ανανέωσε τη λίστα ερωτήσεων πριν αποθηκεύσεις ξανά."
+                : "Η επίσκεψη άλλαξε από άλλον χρήστη. Άνοιξε τη νεότερη καταχώριση πριν αποθηκεύσεις."
+        });
+    }
     catch (DbUpdateException exception)
     { app.Logger.LogWarning(exception, "Database constraint rejected a write"); context.Response.StatusCode = 409; await context.Response.WriteAsJsonAsync(new { message = "Η καταχώριση συγκρούεται με αποθηκευμένα στοιχεία. Ανανέωσε τη σελίδα." }); }
     catch (Exception exception) when (exception is not OperationCanceledException)
