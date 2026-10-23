@@ -4,6 +4,7 @@ import {markVisitDeleted} from './visitLifecycle';
 import {incompleteQuestions,hasVisitContent} from './surveyRules';
 import type {Draft,Outbox,Mutation} from './offlineStore';
 import type {Visit,Detail} from './types';
+import {customerKey,pendingCustomers,sendCustomerChanges} from './customerQueue';
 
 export const SYNC_INTERVAL_MS = 5 * 60 * 1000;
 export type SyncProgress = {running:boolean;sent:number;total:number;message:string;checkedAt?:string};
@@ -90,17 +91,28 @@ export async function syncNow(){
     ownsLease=true;
     await collectCorrections(user.id);
     let records=await allOutbox(user.id);
+    const customers=await pendingCustomers(user.id);
     records.forEach(record=>seen.add(record.visitId));
-    report({running:true,sent:0,total:seen.size,message:records.length?'Έλεγχος σύνδεσης…':'Δεν υπάρχουν απαντήσεις για αποστολή.'});
-    if(!records.length)return;
+    customers.forEach(record=>seen.add(`customer:${record.branchCode}`));
+    report({running:true,sent:0,total:seen.size,message:records.length||customers.length?'Έλεγχος σύνδεσης…':'Δεν υπάρχουν δεδομένα για αποστολή.'});
+    if(!records.length&&!customers.length)return;
     // navigator.onLine alone also reports Wi-Fi networks without Internet access.
     if(!navigator.onLine){report({message:'Χωρίς σύνδεση. Οι απαντήσεις παραμένουν στη συσκευή. Νέα δοκιμή σε 5 λεπτά.'});return;}
     try{await api('/auth/status',{timeoutMs:5000});}
     catch{window.dispatchEvent(new CustomEvent('paper-network',{detail:'cached'}));report({message:'Δεν υπάρχει σύνδεση με την εφαρμογή. Νέα δοκιμή σε 5 λεπτά.'});return;}
+    const customerResult=await sendCustomerChanges(user,code=>{
+      completed.add(`customer:${code}`);report({sent:completed.size,total:seen.size});
+    },async()=>{
+      const lease=await mutate<{owner:string;until:number}>(lockKey,current=>current?.owner===owner?{owner,until:Date.now()+45000}:current);
+      return lease?.owner===owner;
+    });
+    if(customerResult.connectionLost)return;
+    const blockedCustomers=new Set((await pendingCustomers(user.id)).map(record=>record.branchCode));
     while(records.length){
       let processed=false;
       for(const record of records){
-        if(record.state==='conflict'||record.state==='error'||record.state==='deleted')continue;
+        if(record.state==='conflict'||record.state==='error'||record.state==='deleted'||blockedCustomers.has(record.branchCode))continue;
+        if(await get(customerKey(user.id,record.branchCode)))continue;
         seen.add(record.visitId);
         for(const operation of record.operations){
           if(attempted.has(operation.id))break;
@@ -143,9 +155,10 @@ export async function syncNow(){
       if(!processed)break;
     }
     const remaining=await allOutbox(user.id);
-    report({sent:completed.size,total:seen.size,message:remaining.length?
-      `${remaining.length} επισκέψεις παραμένουν στη συσκευή. Όσες χρειάζονται έλεγχο εμφανίζονται παρακάτω.`:
-      'Στάλθηκαν όλες οι αποθηκευμένες απαντήσεις.'});
+    const remainingCustomers=await pendingCustomers(user.id);
+    report({sent:completed.size,total:seen.size,message:remaining.length||remainingCustomers.length?
+      `${remaining.length} επισκέψεις και ${remainingCustomers.length} καρτέλες πελατών παραμένουν στη συσκευή. Όσες χρειάζονται έλεγχο εμφανίζονται παρακάτω.`:
+      'Στάλθηκαν όλες οι αποθηκευμένες απαντήσεις και οι καρτέλες πελατών.'});
   }catch{
     report({message:'Δεν ολοκληρώθηκε η αποστολή. Οι απαντήσεις παραμένουν στη συσκευή.'});
   }finally{

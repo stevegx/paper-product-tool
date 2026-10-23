@@ -5,7 +5,7 @@ export type User = {
   role: 'Admin' | 'Seller';
   active: boolean;
 };
-export type Branch = { code: string; taxId: string; name: string; assignedSeller: string };
+export type Branch = { code: string; taxId: string; name: string; assignedSeller: string; profession?:string; address?:string; postalCode?:string; city?:string; phone?:string; taxOffice?:string; customerNotes?:string; createdById?:string; customerVersion?:number; pendingCreation?:boolean; pendingCustomerChange?:boolean };
 export type Question = {
   id: string;
   title: string;

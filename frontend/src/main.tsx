@@ -27,12 +27,16 @@ import {
 import { api, ApiError, dateTime, json, resetCsrf, download } from './api';
 import type { Branch, Overview, Survey, User, VisitPage, Question, Visit } from './types';
 import CustomerPage, { EditVisitPage } from './CustomerPage';
+import CustomerForm from './CustomerForm';
+import {pendingCustomers} from './customerQueue';
+import type {CustomerPending} from './customerQueue';
 import OfflineStatus from './OfflineStatus';
 import QuestionEditor from './QuestionEditor';
 import {session,setSession,allOutbox} from './offlineStore';
 import VisitAnswers from './VisitAnswers';
 import './styles.css';
 import './reliability.css';
+import './customer.css';
 import {markVisitDeleted,markVisitRestored} from './visitLifecycle';
 import DeleteVisitDialog from './DeleteVisitDialog';
 
@@ -210,6 +214,8 @@ function CustomerSearch({
 }) {
   const [tax, setTax] = useState(() => sessionStorage.getItem('last-tax') ?? '');
   const [results, setResults] = useState<Branch[] | null>(null);
+  const [customerQueue,setCustomerQueue]=useState<CustomerPending[]>([]);
+  useEffect(()=>{const refresh=()=>{const user=session();if(user)void pendingCustomers(user.id).then(setCustomerQueue);};refresh();window.addEventListener('paper-sync',refresh);return()=>window.removeEventListener('paper-sync',refresh);},[]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   async function search(event?: React.FormEvent) {
@@ -243,10 +249,10 @@ function CustomerSearch({
           <h1>Πελάτες</h1>
           <p>Βρες τον πελάτη σου και οργάνωσε την επίσκεψή σου.</p>
         </div>
-        <span className="pill subtle">
+        <div className="heading-actions"><button className="btn primary" onClick={()=>go('/customer-new')}><Plus size={17}/>Νέος πελάτης</button><span className="pill subtle">
           <Database size={14} />
           {overview ? `${overview.customers.toLocaleString('el-GR')} πελάτες` : 'Φόρτωση βάσης…'}
-        </span>
+        </span></div>
       </div>
       <section className="search-hero">
         <div className="hero-decoration">
@@ -305,6 +311,7 @@ function CustomerSearch({
         </small>
       </section>
       {error && <Notice>{error}</Notice>}
+      {customerQueue.length>0&&<section className="panel"><h2>Καρτέλες που περιμένουν αποστολή</h2>{customerQueue.map(row=><div className="customer-pending-row" key={row.branchCode}><a href={`#/customers/${encodeURIComponent(row.branchCode)}`}>{row.operations.at(-1)?.body.name} · ΑΦΜ {row.operations.at(-1)?.body.taxId}</a><a href={`#/customer-edit/${encodeURIComponent(row.branchCode)}`}>{row.state==='review'||row.state==='conflict'?'Έλεγχος στοιχείων':'Επεξεργασία'}</a></div>)}</section>}
       <section className="panel results-panel">
         <div className="section-heading">
           <div>
@@ -1132,6 +1139,10 @@ function App() {
           {error && <Notice>{error}</Notice>}
           {route === '/customers' ? (
             <CustomerSearch go={go} overview={overview} />
+          ) : route === '/customer-new' ? (
+            <CustomerForm key="new-customer" user={user} go={go}/>
+          ) : route.startsWith('/customer-edit/') ? (
+            <CustomerForm key={route} code={decodeURIComponent(route.slice('/customer-edit/'.length))} user={user} go={go}/>
           ) : customerRoute && code ? (
             <CustomerPage key={code} code={code} go={go} user={user} />
           ) : route.startsWith('/edit/') ? (<EditVisitPage key={route} id={route.slice('/edit/'.length)} user={user} go={go}/>) : route === '/visits' ? (

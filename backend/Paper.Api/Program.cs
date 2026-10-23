@@ -92,12 +92,14 @@ app.Use(async (context, next) =>
     catch (DbUpdateConcurrencyException)
     {
         var questionChange = context.Request.Path.StartsWithSegments("/api/admin/questions");
+        var customerChange = context.Request.Path.StartsWithSegments("/api/customers");
         context.Response.StatusCode = 409;
         await context.Response.WriteAsJsonAsync(new
         {
-            code = questionChange ? "question_conflict" : "conflict",
+            code = questionChange ? "question_conflict" : customerChange ? "customer_conflict" : "conflict",
             message = questionChange
                 ? "Η ερώτηση ή οι επιλογές της άλλαξαν. Ανανέωσε τη λίστα ερωτήσεων πριν αποθηκεύσεις ξανά."
+                : customerChange ? "Τα στοιχεία του πελάτη άλλαξαν. Σύγκρινε τις νεότερες αλλαγές πριν αποθηκεύσεις."
                 : "Η επίσκεψη άλλαξε από άλλον χρήστη. Άνοιξε τη νεότερη καταχώριση πριν αποθηκεύσεις."
         });
     }
@@ -120,6 +122,7 @@ app.Use(async (context, next) =>
 app.MapGet("/healthz", () => Results.Ok(new { status = "ok", commit = app.Configuration["RENDER_GIT_COMMIT"] })).AllowAnonymous();
 app.MapAuthEndpoints();
 app.MapCustomerEndpoints();
+app.MapCustomerEditing();
 app.MapAdminEndpoints();
 app.MapVisitEndpoints();
 app.MapVisitDeletion();
@@ -136,6 +139,7 @@ await using (var scope = app.Services.CreateAsyncScope())
     await db.Database.EnsureCreatedAsync();
     await SurveyCatalog.UpgradeAsync(db);
     await VisitUpgrade.Run(db);
+    await CustomerUpgrade.Run(db);
     if (app.Configuration.GetValue("Survey:InstallDefault", true))
         await SurveyCatalog.InstallAsync(db, Path.Combine(app.Environment.ContentRootPath, "Surveys", "store-visit-v1.json"));
     if (!await db.Users.AnyAsync() && config["Bootstrap:Email"] is { Length: > 0 } email && config["Bootstrap:Password"] is { Length: > 0 } password)

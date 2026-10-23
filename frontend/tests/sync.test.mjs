@@ -22,6 +22,7 @@ async function harness(){
  const mock={
   get:async key=>structuredClone(entries.get(key)),readDraft:(_user,branch)=>drafts.find(d=>d.branchCode===branch),
   session:()=>state.user,allOutbox:async()=>[...entries].filter(([key])=>key.startsWith('outbox:')).map(([,value])=>structuredClone(value)),
+  matchingEntries:async prefix=>[...entries].filter(([key])=>key.startsWith(prefix)).map(([,value])=>structuredClone(value)),
   mutate:async(key,fn)=>{const value=fn(structuredClone(entries.get(key)));if(value===undefined)entries.delete(key);else entries.set(key,structuredClone(value));return value;},
   put:async(key,value)=>entries.set(key,structuredClone(value)),signal:()=>{},
   saveDraft:value=>{const index=drafts.findIndex(draft=>draft.id===value.id);if(index>=0)drafts[index]=value;},
@@ -35,6 +36,7 @@ async function harness(){
   const body=JSON.parse(options.body);calls.push({path,body});
   if(state.hook)await state.hook(path,body);
   if(state.fail)await state.fail(path,body);
+  if(path==='/customers'||path.startsWith('/customers/'))return {...body,code:path==='/customers'?`NEW-${body.mutationId.replaceAll('-','')}`:decodeURIComponent(path.split('/')[2]),customerVersion:body.expectedVersion+1,assignedSeller:'Seller',createdById:user.id};
   return {id:path.split('/')[2],version:body.expectedVersion+1,branchCode:body.branchCode,createdAtUtc:body.occurredAtUtc,answers:[],notes:body.notes};
  };
  globalThis.__paperSyncTest=mock;
@@ -44,8 +46,49 @@ async function harness(){
    'const m=globalThis.__paperSyncTest;export const {'+Object.keys(mock).join(',')+'}=m;',loader:'js'}));
  }};
  const module=await bundle('src/sync.ts',[plugin]);
- return {module,entries,drafts,calls,state,mock};
+ const customers=await bundle('src/customerQueue.ts',[plugin]);
+ return {module,customers,entries,drafts,calls,state,mock};
 }
+
+const customerFields={name:'New customer',taxId:'099999999',profession:'Cafe',address:'Test street 1',postalCode:'10558',city:'Athens',phone:'2101234567',taxOffice:'Athens',customerNotes:'Optional customer notes',allowExistingTaxId:false};
+test('Offline customer and visit survive in storage and are sent in dependency order',async()=>{
+ const h=await harness();const code=h.customers.newCustomerCode(crypto.randomUUID());
+ h.state.connected=false;await h.customers.queueCustomer(user,code,customerFields);
+ await h.module.enqueue({...draft('visit'),branchCode:code},false);await h.module.syncNow();
+ assert.equal((await h.customers.pendingCustomers(user.id)).length,1);assert.equal((await h.mock.allOutbox()).length,1);assert.equal(h.calls.length,0);
+ h.state.connected=true;await h.module.syncNow();
+ assert.deepEqual(h.calls.map(call=>call.path),['/customers','/visits/visit']);
+ assert.equal((await h.customers.pendingCustomers(user.id)).length,0);assert.equal((await h.mock.allOutbox()).length,0);
+ assert.equal(h.module.syncProgress().sent,2);
+});
+test('An edit appended while a customer is sending keeps both immutable operations',async()=>{
+ const h=await harness();const code=h.customers.newCustomerCode(crypto.randomUUID());let added=false;
+ await h.customers.queueCustomer(user,code,customerFields);
+ h.state.hook=async path=>{if(path==='/customers'&&!added){added=true;await h.customers.queueCustomer(user,code,{...customerFields,name:'Edited name'});}};
+ await h.module.syncNow();
+ assert.deepEqual(h.calls.map(call=>call.path),['/customers',`/customers/${code}`]);
+ assert.deepEqual(h.calls.map(call=>call.body.expectedVersion),[0,1]);
+ assert.equal(h.calls[0].body.name,'New customer');assert.equal(h.calls[1].body.name,'Edited name');
+ const cached=await h.mock.get(`cache:${user.id}:/customers/${code}`);assert.equal(cached.branch.name,'Edited name');assert.equal(cached.branch.customerVersion,2);
+});
+test('An unresolved customer conflict blocks its visit and preserves unrelated sends',async()=>{
+ const h=await harness();const code=h.customers.newCustomerCode(crypto.randomUUID());
+ await h.customers.queueCustomer(user,code,customerFields);await h.module.enqueue({...draft('blocked'),branchCode:code},false);await h.module.enqueue(draft('other'),false);
+ h.state.fail=async path=>{if(path==='/customers')throw new h.mock.ApiError('Changed',409,{code:'customer_conflict'});};
+ await h.module.syncNow();
+ assert.deepEqual(h.calls.map(call=>call.path),['/customers','/visits/other']);
+ assert.equal((await h.customers.pendingCustomers(user.id))[0].state,'conflict');assert.equal((await h.mock.allOutbox())[0].visitId,'blocked');
+});
+test('Same customer submission is deduplicated and an existing AFM can be explicitly confirmed',async()=>{
+ const h=await harness();const code=h.customers.newCustomerCode(crypto.randomUUID());
+ await h.customers.queueCustomer(user,code,customerFields);await h.customers.queueCustomer(user,code,customerFields);
+ assert.equal((await h.customers.pendingCustomers(user.id))[0].operations.length,1);
+ h.state.fail=async()=>{throw new h.mock.ApiError('Check branch',409,{code:'existing_tax_id',existing:[{code:'other'}]});};
+ await h.module.syncNow();assert.equal((await h.customers.pendingCustomers(user.id))[0].state,'review');
+ h.state.fail=null;await h.customers.reviseCustomer(user,code,{...customerFields,allowExistingTaxId:true});await h.module.syncNow();
+ assert.equal((await h.customers.pendingCustomers(user.id)).length,0);assert.equal(h.calls[1].body.allowExistingTaxId,true);
+ assert.equal(h.calls[0].body.mutationId,h.calls[1].body.mutationId);
+});
 
 test('Automatic retry interval is five minutes and ignores focus/online spam',async()=>{
  const h=await harness();h.state.user=null;

@@ -6,6 +6,8 @@ import {incompleteQuestions,hasVisitContent} from './surveyRules';
 import type {Snapshot,Outbox} from './offlineStore';
 import type {User,Detail} from './types';
 import {startSync,syncNow,syncProgress} from './sync';
+import {cacheCustomer,pendingCustomers} from './customerQueue';
+import type {CustomerPending} from './customerQueue';
 
 async function shellReady(){
  if(!('serviceWorker'in navigator))throw new Error('Αυτός ο browser δεν υποστηρίζει άνοιγμα χωρίς σύνδεση.');
@@ -31,14 +33,16 @@ export default function OfflineStatus({user}:{user:User}){
  const [busy,setBusy]=useState(false),[error,setError]=useState(''),[offline,setOffline]=useState(!navigator.onLine);
  const [progress,setProgress]=useState(syncProgress());
  const [records,setRecords]=useState<(Outbox&{customerName:string})[]>([]);
+ const [customers,setCustomers]=useState<CustomerPending[]>([]);
  async function refresh(){
   const outbox=await allOutbox(user.id);
+  const customerRows=await pendingCustomers(user.id);setCustomers(customerRows);
   const ids=new Set(outbox.map(item=>item.visitId));
   for(const draft of draftsForUser(user.id)){
    if(!draft.deletedOnServer&&hasVisitContent(draft.survey.questions,draft.answers,draft.notes)&&draft.serverVersion>0&&draft.revision!==draft.savedRevision&&
      !incompleteQuestions(draft.survey.questions,draft.answers).length)ids.add(draft.id);
   }
-  setPending(ids.size);
+  setPending(ids.size+customerRows.length);
   setRecords(await Promise.all(outbox.map(async item=>{
    const detail=await get<Detail>(`cache:${user.id}:/customers/${encodeURIComponent(item.branchCode)}`);
    return {...item,customerName:detail?.branch.name??item.branchCode};
@@ -51,6 +55,10 @@ export default function OfflineStatus({user}:{user:User}){
    await shellReady();
    const snapshot=await api<Snapshot>('/offline/snapshot',{timeoutMs:60000});
    await storeSnapshot(snapshot,user);
+   for(const record of await pendingCustomers(user.id)){
+    const detail=await get<Detail>(`cache:${user.id}:/customers/${encodeURIComponent(record.branchCode)}`);
+    if(detail)await cacheCustomer(user,{...detail.branch,...record.operations.at(-1)?.body,pendingCreation:!detail.branch.customerVersion,pendingCustomerChange:true});
+   }
    if(navigator.storage?.persist)await navigator.storage.persist();
    await refresh();
   }catch(error){setError(error instanceof Error?error.message:'Δεν ολοκληρώθηκε η προετοιμασία.');}
@@ -84,13 +92,13 @@ export default function OfflineStatus({user}:{user:User}){
  return <section className={`offline-bar ${offline?'is-offline':''}`} aria-label="Αποθήκευση και αποστολή">
   <div className="connection-label">{offline?<WifiOff size={17}/>:<CloudDownload size={17}/>}<span>
    {offline?'Χωρίς σύνδεση':prepared?'Έτοιμο για χρήση χωρίς σύνδεση':busy?'Προετοιμασία για χρήση χωρίς σύνδεση…':'Χρειάζεται προετοιμασία για χρήση χωρίς σύνδεση'}
-   {pending>0&&<b> · {pending} {pending===1?'επίσκεψη περιμένει':'επισκέψεις περιμένουν'} αποστολή</b>}
+   {pending>0&&<b> · {pending} {pending===1?'καταχώριση περιμένει':'καταχωρίσεις περιμένουν'} αποστολή</b>}
   </span></div>
   <div className="sync-actions">
    <button className="text-button" disabled={busy||offline} onClick={()=>void prepare()}>{busy?'Προετοιμασία…':prepared?'Ανανέωση δεδομένων':'Λήψη για offline'}</button>
    <button className="btn primary sync-send" disabled={progress.running||pending===0} onClick={()=>void syncNow()}>
     {progress.running?<RefreshCw size={16} className="spin"/>:<CloudUpload size={17}/>}
-    Αποστολή απαντήσεων ({count})
+    Αποστολή δεδομένων ({count})
    </button>
   </div>
   <div className="sync-explanation">Αυτόματος έλεγχος ανά 5 λεπτά, όσο η εφαρμογή είναι ανοιχτή. Περιλαμβάνει τις ολοκληρωμένες διορθώσεις ήδη σταλμένων επισκέψεων.</div>
@@ -101,6 +109,7 @@ export default function OfflineStatus({user}:{user:User}){
   {needsReview.length>0&&<details className="queue-review"><summary>{needsReview.length} {needsReview.length===1?'επίσκεψη χρειάζεται':'επισκέψεις χρειάζονται'} έλεγχο</summary>
    <ul>{needsReview.map(item=><li key={item.visitId}><a href={`#/customers/${encodeURIComponent(item.branchCode)}`}>{item.customerName}</a><span>{item.message??'Άνοιξε την επίσκεψη για έλεγχο.'}</span></li>)}</ul>
   </details>}
+  {customers.some(customer=>['review','conflict','auth'].includes(customer.state))&&<div className="queue-review"><strong>Καρτέλες πελατών που χρειάζονται έλεγχο</strong><ul>{customers.filter(customer=>['review','conflict','auth'].includes(customer.state)).map(customer=><li key={customer.branchCode}><a href={`#/customer-edit/${encodeURIComponent(customer.branchCode)}`}>{customer.operations.at(-1)?.body.name}</a><span>{customer.message}</span></li>)}</ul></div>}
   {error&&<p role="alert">{error}</p>}
  </section>;
 }

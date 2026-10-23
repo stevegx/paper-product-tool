@@ -15,6 +15,10 @@ export function resetCsrf() {
 export async function api<T>(path: string, options: RequestInit & { timeoutMs?: number; csrfRetried?: boolean } = {}): Promise<T> {
   const {timeoutMs=options.method?12000:6000,csrfRetried=false,...fetchOptions}=options;
   const accountId=session()?.id;
+  if(!options.method&&accountId&&/^\/customers\//.test(path)){
+    const local=await get<import('./types').Detail>(`cache:${accountId}:${path}`).catch(()=>undefined);
+    if(local?.branch.pendingCreation||local?.branch.pendingCustomerChange)return local as T;
+  }
   const cacheable=!options.method && (/^\/customers(?:\?|\/)/.test(path)||path==='/survey'||path==='/overview'||path==='/auth/me'||/^\/visits\/[^/]+\/editor$/.test(path));
   const controller=new AbortController();
   const timeout=setTimeout(()=>controller.abort(),timeoutMs);

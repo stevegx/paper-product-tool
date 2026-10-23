@@ -9,6 +9,23 @@ public sealed class Branch
     public string TaxId { get; set; } = "";
     public string Name { get; set; } = "";
     public string AssignedSeller { get; set; } = "";
+    public string Profession { get; set; } = "";
+    public string Address { get; set; } = "";
+    public string PostalCode { get; set; } = "";
+    public string City { get; set; } = "";
+    public string Phone { get; set; } = "";
+    public string TaxOffice { get; set; } = "";
+    public string CustomerNotes { get; set; } = "";
+    public Guid? CreatedById { get; set; }
+    public DateTime? CustomerCreatedAtUtc { get; set; }
+    public DateTime? CustomerUpdatedAtUtc { get; set; }
+    public int CustomerVersion { get; set; }
+}
+public sealed class CustomerMutation
+{
+    public string Id { get; set; } = "";
+    public string BodyHash { get; set; } = "";
+    public string ResultJson { get; set; } = "";
 }
 public sealed class ProductCategory
 {
@@ -106,6 +123,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
 {
     public DbSet<DataProtectionKey> DataProtectionKeys { get; set; } = null!;
     public DbSet<Branch> Branches => Set<Branch>();
+    public DbSet<CustomerMutation> CustomerMutations => Set<CustomerMutation>();
     public DbSet<ProductCategory> Categories => Set<ProductCategory>();
     public DbSet<CategoryTurnover> Turnovers => Set<CategoryTurnover>();
     public DbSet<AppUser> Users => Set<AppUser>();
@@ -123,6 +141,16 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
         b.Entity<Branch>().Property(x => x.Name).HasMaxLength(512);
         b.Entity<Branch>().Property(x => x.AssignedSeller).HasMaxLength(128);
         b.Entity<Branch>().HasIndex(x => x.TaxId);
+        b.Entity<Branch>().Property(x => x.Profession).HasMaxLength(256);
+        b.Entity<Branch>().Property(x => x.Address).HasMaxLength(512);
+        b.Entity<Branch>().Property(x => x.PostalCode).HasMaxLength(5);
+        b.Entity<Branch>().Property(x => x.City).HasMaxLength(128);
+        b.Entity<Branch>().Property(x => x.Phone).HasMaxLength(32);
+        b.Entity<Branch>().Property(x => x.TaxOffice).HasMaxLength(128);
+        b.Entity<Branch>().Property(x => x.CustomerNotes).HasMaxLength(2000);
+        b.Entity<Branch>().Property(x => x.CustomerVersion).IsConcurrencyToken();
+        b.Entity<CustomerMutation>().Property(x => x.Id).HasMaxLength(80);
+        b.Entity<CustomerMutation>().Property(x => x.BodyHash).HasMaxLength(64);
         b.Entity<ProductCategory>().Property(x => x.Name).HasMaxLength(256);
         b.Entity<ProductCategory>().Property(x => x.Id).ValueGeneratedNever();
         b.Entity<CategoryTurnover>().HasKey(x => new { x.BranchCode, x.CategoryId, x.Year });
