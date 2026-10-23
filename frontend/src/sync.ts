@@ -101,6 +101,7 @@ export async function syncNow(){
     try{await api('/auth/status',{timeoutMs:5000});}
     catch{window.dispatchEvent(new CustomEvent('paper-network',{detail:'cached'}));report({message:'Δεν υπάρχει σύνδεση με την εφαρμογή. Νέα δοκιμή σε 5 λεπτά.'});return;}
     const customerResult=await sendCustomerChanges(user,code=>{
+      seen.add(`customer:${code}`);
       completed.add(`customer:${code}`);report({sent:completed.size,total:seen.size});
     },async()=>{
       const lease=await mutate<{owner:string;until:number}>(lockKey,current=>current?.owner===owner?{owner,until:Date.now()+45000}:current);

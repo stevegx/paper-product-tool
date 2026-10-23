@@ -32,7 +32,7 @@ import {pendingCustomers} from './customerQueue';
 import type {CustomerPending} from './customerQueue';
 import OfflineStatus from './OfflineStatus';
 import QuestionEditor from './QuestionEditor';
-import {session,setSession,allOutbox} from './offlineStore';
+import {session,setSession,allOutbox,get as getOffline} from './offlineStore';
 import VisitAnswers from './VisitAnswers';
 import './styles.css';
 import './reliability.css';
@@ -228,12 +228,15 @@ function CustomerSearch({
     setBusy(true);
     setError('');
     setResults(null);
+    let localCustomers:Branch[]=[];
     try {
+      const user=session();
+      if(user){const queued=await pendingCustomers(user.id);const cached=await Promise.all(queued.filter(row=>row.operations.at(-1)?.body.taxId===tax).map(row=>getOffline<import('./types').Detail>(`cache:${user.id}:/customers/${encodeURIComponent(row.branchCode)}`)));localCustomers=cached.flatMap(value=>value?[value.branch]:[]);}
       const rows = await api<Branch[]>(`/customers?afm=${tax}`);
-      setResults(rows);
+      setResults([...new Map([...rows,...localCustomers].map(branch=>[branch.code,branch])).values()]);
       sessionStorage.setItem('last-tax', tax);
     } catch (error) {
-      setError(message(error));
+      if(localCustomers.length)setResults(localCustomers);else setError(message(error));
     } finally {
       setBusy(false);
     }
@@ -311,7 +314,7 @@ function CustomerSearch({
         </small>
       </section>
       {error && <Notice>{error}</Notice>}
-      {customerQueue.length>0&&<section className="panel"><h2>Καρτέλες που περιμένουν αποστολή</h2>{customerQueue.map(row=><div className="customer-pending-row" key={row.branchCode}><a href={`#/customers/${encodeURIComponent(row.branchCode)}`}>{row.operations.at(-1)?.body.name} · ΑΦΜ {row.operations.at(-1)?.body.taxId}</a><a href={`#/customer-edit/${encodeURIComponent(row.branchCode)}`}>{row.state==='review'||row.state==='conflict'?'Έλεγχος στοιχείων':'Επεξεργασία'}</a></div>)}</section>}
+      {customerQueue.length>0&&<section className="panel customer-pending-list"><h2>Καρτέλες που περιμένουν αποστολή</h2>{customerQueue.map(row=><div className="customer-pending-row" key={row.branchCode}><a href={`#/customers/${encodeURIComponent(row.branchCode)}`}>{row.operations.at(-1)?.body.name} · ΑΦΜ {row.operations.at(-1)?.body.taxId}</a><a href={`#/customer-edit/${encodeURIComponent(row.branchCode)}`}>{row.state==='review'||row.state==='conflict'?'Έλεγχος στοιχείων':'Επεξεργασία'}</a></div>)}</section>}
       <section className="panel results-panel">
         <div className="section-heading">
           <div>

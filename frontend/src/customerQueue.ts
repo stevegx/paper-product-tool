@@ -54,6 +54,7 @@ export async function sendCustomerChanges(user:User,onSent:(code:string)=>void,b
           if(!current)return current;const operations=current.operations.filter(value=>value.id!==operation.id);
           return operations.length?{...current,operations,state:'waiting'}:undefined;
         });
+        window.dispatchEvent(new CustomEvent('paper-customer-saved',{detail:{userId:user.id,branchCode:row.branchCode,branch}}));
         if(!remaining)onSent(row.branchCode);
       }catch(error){
         const status=error instanceof ApiError?error.status:0;const data=error instanceof ApiError?error.data:undefined;

@@ -63,12 +63,14 @@ test('Offline customer and visit survive in storage and are sent in dependency o
 });
 test('An edit appended while a customer is sending keeps both immutable operations',async()=>{
  const h=await harness();const code=h.customers.newCustomerCode(crypto.randomUUID());let added=false;
+ const acknowledgements=[];window.addEventListener('paper-customer-saved',event=>acknowledgements.push(event.detail.branch.customerVersion));
  await h.customers.queueCustomer(user,code,customerFields);
  h.state.hook=async path=>{if(path==='/customers'&&!added){added=true;await h.customers.queueCustomer(user,code,{...customerFields,name:'Edited name'});}};
  await h.module.syncNow();
  assert.deepEqual(h.calls.map(call=>call.path),['/customers',`/customers/${code}`]);
  assert.deepEqual(h.calls.map(call=>call.body.expectedVersion),[0,1]);
  assert.equal(h.calls[0].body.name,'New customer');assert.equal(h.calls[1].body.name,'Edited name');
+ assert.deepEqual(acknowledgements,[1,2]);
  const cached=await h.mock.get(`cache:${user.id}:/customers/${code}`);assert.equal(cached.branch.name,'Edited name');assert.equal(cached.branch.customerVersion,2);
 });
 test('An unresolved customer conflict blocks its visit and preserves unrelated sends',async()=>{

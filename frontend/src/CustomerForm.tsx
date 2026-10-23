@@ -27,19 +27,21 @@ export default function CustomerForm({user,go,code:editCode}:{user:User;go:(path
   if(!editCode)return;let live=true;
   Promise.all([api<Detail>(`/customers/${encodeURIComponent(code)}`),get<CustomerPending>(customerKey(user.id,code))]).then(([detail,pending])=>{
    if(!live)return;if(!detail.branch.createdById)throw new Error('Η επεξεργασία αφορά νέους πελάτες που ανοίχτηκαν από την εφαρμογή.');
-   setBranch(initial?.base??detail.branch);setPending(pending);setExisting(pending?.existing??[]);
+   const base=initial?.base??detail.branch;
+   setBranch(previous=>(previous?.customerVersion??0)>(base.customerVersion??0)?previous:base);setPending(pending);setExisting(pending?.existing??[]);
    const queued=pending?.operations.at(-1)?.body;
    setFields(initial?.fields??(queued?Object.fromEntries(Object.keys(empty).map(key=>[key,queued[key as keyof CustomerFields]])) as CustomerFields:fieldsFrom(detail.branch)));
   }).catch(error=>{if(live)setError(error.message);}).finally(()=>{if(live)setLoading(false);});return()=>{live=false;};
  },[code,user.id]);
  useEffect(()=>{
-  if(loading||saved)return;
+  if(loading||saved&&pending?.state!=='review'&&pending?.state!=='conflict')return;
   try{localStorage.setItem(draftKey,JSON.stringify({code,fields,base:branch}));}catch{setError('Δεν υπάρχει διαθέσιμος χώρος στη συσκευή. Μην κλείσεις τη φόρμα πριν σταλεί ο πελάτης.');}
- },[fields,code,branch,loading,saved]);
+ },[fields,code,branch,loading,saved,pending?.state]);
  useEffect(()=>{
   let live=true;
   const refresh=()=>{void Promise.all([get<CustomerPending>(customerKey(user.id,code)),get<Detail>(`cache:${user.id}:/customers/${encodeURIComponent(code)}`)]).then(([value,detail])=>{if(live){setPending(value);setConfirmed(!value&&!!detail?.branch.customerVersion&&!detail.branch.pendingCustomerChange);if(value?.existing)setExisting(value.existing);}});};
-  window.addEventListener('paper-sync',refresh);refresh();return()=>{live=false;window.removeEventListener('paper-sync',refresh);};
+  const acknowledged=(event:Event)=>{const info=(event as CustomEvent<{userId:string;branchCode:string;branch:Branch}>).detail;if(info.userId===user.id&&info.branchCode===code)setBranch(info.branch);};
+  window.addEventListener('paper-sync',refresh);window.addEventListener('paper-customer-saved',acknowledged);refresh();return()=>{live=false;window.removeEventListener('paper-sync',refresh);window.removeEventListener('paper-customer-saved',acknowledged);};
  },[code,user.id]);
  useEffect(()=>{
   if(!/^\d{9}$/.test(fields.taxId)){setExisting([]);return;}let live=true;
